@@ -1,20 +1,21 @@
 import pygame
 import threading
-import requests
+import random
+import os
 
 from src.ship import *
 from src.client import *
 from src.server import *
 
-ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+IP = input("Connect to IP (leave empty if host):").strip()
 RES = [1280, 720]
+R_SCL = RES[0] / 1280
 FPS = 30
 
-BG_COLOR = [255, 255, 255]
-ENB_COLOR = [232, 164, 82]
-PLB_COLOR = [82, 164, 232]
-ENL_COLOR = [c - 30 for c in ENB_COLOR]
-PLL_COLOR = [c - 30 for c in PLB_COLOR]
+BG_COLOR = [0, 0, 35]
+ENL_COLOR = [80, 0, 0]
+MISSILE_COLOR = [24, 89, 55]
+PLL_COLOR = [0, 80, 0]
 
 def is_ship_on_board(ship: Ship) -> bool:
     for p in ship.parts:
@@ -33,20 +34,23 @@ def listen_to_server(client):
 pygame.init()
 display = pygame.display.set_mode(RES)
 clock = pygame.time.Clock()
-win_font = pygame.font.SysFont("Comic Sans MS", 64)
-notif_font = pygame.font.SysFont("Comic Sans MS", 32)
+win_font = pygame.font.SysFont("Comic Sans MS", int(64 * R_SCL))
+notif_font = pygame.font.SysFont("Comic Sans MS", int(32 * R_SCL))
 notif_text = notif_font.render("", False, [255, 255, 255], [0, 0, 0])
-lose_text = win_font.render("You lost, better luck next time!", True, [255, 128, 128], [0, 0, 0])
-win_text = win_font.render("You won! Congratulations!", True, [128, 255, 128], [0, 0, 0])
+lose_text = win_font.render("| || this is so sad || |_", True, [255, 128, 128], [0, 0, 0])
+win_text = win_font.render("gg ez", True, [128, 255, 128], [0, 0, 0])
 server_info_text = None
 
-ship_units = [4, 3, 2, 2, 1]
-bd_separator = 50
-bd_size = 8
-bd_scale = 64
+volume = 0
+restart_timer = -1
+ship_units = [4, 3, 3, 2, 2, 1]
+bd_separator = 50 * R_SCL
+bd_size = int(8 * R_SCL)
+bd_scale = int(64 * R_SCL)
 notif_timer = 0
 bd_sisc = bd_scale * bd_size
 player_turn = False
+reset_sound = False
 recv_msg = None
 msgs_to_send = []
 result = None
@@ -69,17 +73,35 @@ enb_topleft = [
     (RES[1] - bd_sisc) // 2
 ]
 _pos = translate(plb_topleft, [-10, -10])
-plb_bg_r = pygame.Rect(_pos[0], _pos[1], bd_sisc + 20, bd_sisc + 20)
 _pos = translate(enb_topleft, [-10, -10])
-enb_bg_r = pygame.Rect(_pos[0], _pos[1], bd_sisc + 20, bd_sisc + 20)
 del _pos
 
+pygame.mixer.music.load('src/music/bgm.ogg')
+pygame.mixer.music.set_volume(volume)
+pygame.mixer.music.play(-1)
+
+sounds = {}
+for f in os.listdir('src/sfx'):
+    f = os.path.splitext(f)
+    if f[-1] == '.wav':
+        sounds[f[0]] = pygame.mixer.Sound(f'src/sfx/{f[0]}.wav')
+        sounds[f[0]].set_volume(volume)
+
+sprites = {}
+for f in os.listdir('src/sprites'):
+    f = os.path.splitext(f)
+    if f[-1] == '.png':
+        sprites[f[0]] = pygame.image.load(f'src/sprites/{f[0]}.png').convert_alpha()
+for k in ['1', '2', '3', '4']:
+    sprites[k] = pygame.transform.scale(sprites[k], [int(sprites[k].get_width() * bd_scale/300), int(sprites[k].get_height() * bd_scale/300)])
+
+missiles = []
 shots = []
 ships = []
 banned_positions = set()
-preview_ship = Ship([-100, -100], ship_units[len(ships)], 0)
+l = ship_units[len(ships)]
+preview_ship = Ship(sprites[str(l)], [-100, -100], l, 0)
 
-IP = '192.168.1.67'
 server = None
 client = Client()
 
@@ -90,15 +112,22 @@ while run:
 
     clock.tick(FPS)
 
+    if stage == 1 and PLL_COLOR[1] < 128:
+        PLL_COLOR[1] += (128 - PLL_COLOR[1]) * 0.05
+        ENL_COLOR[0] -= (128 - PLL_COLOR[1]) * 0.05
+    elif stage == 2 and ENL_COLOR[0] < 128:
+        ENL_COLOR[0] += (128 - ENL_COLOR[1]) * 0.05
+        PLL_COLOR[1] -= (128 - ENL_COLOR[1]) * 0.05
+
     for e in pygame.event.get():
         if e.type == pygame.QUIT:
             run = False
         
         elif e.type == pygame.MOUSEBUTTONDOWN:
             
-            if stage == 1 and mouse_in_plb and not is_ready['client'] and is_ship_on_board(preview_ship):
+            if client.connected_addr and stage == 1 and mouse_in_plb and not is_ready['client'] and is_ship_on_board(preview_ship):
                 for p in preview_ship.parts:
-                    if f'{plb_mouse_pos[0]};{plb_mouse_pos[1]}' in banned_positions:
+                    if f'{p[0][0]};{p[0][1]}' in banned_positions:
                         break
                 else:
                     ships.append(preview_ship)
@@ -108,16 +137,25 @@ while run:
                             for y in [p[1] - 1, p[1], p[1] + 1]:
                                 banned_positions.add(f"{x};{y}")
                     if len(ships) < len(ship_units):
-                        preview_ship = Ship([-1, -1], ship_units[len(ships)], 0)
+                        l = ship_units[len(ships)]
+                        preview_ship = Ship(sprites[str(l)], [-1, -1], l, 0)
                     else:
                         msgs_to_send.append("READY")
                         is_ready["client"] = True
                         if is_ready["player"]:
                             stage = 2
             
-            elif stage == 2 and mouse_in_enb:
+            elif stage == 2 and mouse_in_enb and player_turn and enb_mouse_pos:
                 shots.append([translate([p * bd_scale + bd_scale // 2 for p in enb_mouse_pos], enb_topleft), False])
-                msgs_to_send.append(f"ATK {enb_mouse_pos[0]} {enb_mouse_pos[1]}")
+                msgs_to_send.append(f"ATK {int(enb_mouse_pos[0])} {int(enb_mouse_pos[1])}")
+                
+                trg = shots[-1][0]
+                for s in ships: # shoot missile from each ship left
+                    src = translate([p * bd_scale + bd_scale // 2 for p in random.choice(s.parts)[0]], plb_topleft)
+                    a = 0.001
+                    b = (src[1] - trg[1] - a * (src[0]**2 - trg[0]**2)) / (src[0] - trg[0])
+                    c = src[1] - a * src[0]**2 - b * src[0]
+                    missiles.append([a, b, c, src[0], trg[0], random.uniform(0.5, 1.5)])
                 player_turn = False
         
         elif e.type == pygame.MOUSEMOTION:
@@ -142,6 +180,8 @@ while run:
                 server = Server()
                 server_thread = threading.Thread(target=server.start)
                 server_thread.start()
+                if IP == '':
+                    IP = server.ADDR[0]
                 client.connect(IP, 5050)
                 listener_thread = threading.Thread(target=listen_to_server, args=(client, ))
                 listener_thread.start()
@@ -152,6 +192,39 @@ while run:
                 listener_thread = threading.Thread(target=listen_to_server, args=(client, ))
                 listener_thread.start()
                 print("CONNECTED")
+            elif e.key == pygame.K_UP:
+                volume += 0.1
+                reset_sound = True
+            elif e.key == pygame.K_DOWN:
+                volume -= 0.1
+                reset_sound = True
+
+    # restart
+    if restart_timer > 0:
+        restart_timer -= 1
+    elif restart_timer == 0:
+        restart_timer -= 1
+        player_turn = False
+        result = None
+        is_ready = {
+            "client": False,
+            "player": False
+        }
+        stage = 1
+        missiles = []
+        shots = []
+        ships = []
+        banned_positions = set()
+        l = ship_units[len(ships)]
+        preview_ship = Ship(sprites[str(l)], [-100, -100], l, 0)
+
+    if reset_sound:
+        reset_sound = False
+        for k in sounds:
+            sounds[k].set_volume(volume - 0.01)
+        pygame.mixer.music.stop()
+        pygame.mixer.music.set_volume(volume)
+        pygame.mixer.music.play(-1)
 
     # SERVER COMMS ---------------------------- #
 
@@ -159,7 +232,6 @@ while run:
     if msgs_to_send:
         m = ';'.join(msgs_to_send)
         client.send(m)
-        print(m)
         msgs_to_send = []
 
     # recv from server
@@ -167,13 +239,13 @@ while run:
         notif_timer = 30
         notif_text = notif_font.render(recv_msg, True, [255, 255, 255], [0, 0, 0])
         recv_msgs = recv_msg.split(';')
-        print(recv_msgs)
+        print(f'RECV: {recv_msgs}')
         for m in recv_msgs:
             m = m.split(' ')
             if m[0] == "ATK":
+                sounds[f'alarm_{random.randint(1, 4)}'].play()
                 player_turn = True
                 pos = [int(m[1]), int(m[2])]
-                print(pos)
                 shots.append([translate([p * bd_scale + bd_scale // 2 for p in pos], plb_topleft), False])
                 for i, s in enumerate(ships):
                     if not s.isHit(pos):
@@ -187,15 +259,20 @@ while run:
                         if len(ships) == 0:
                             msgs_to_send.append("ENEMY_WIN")
                             result = 'LOSE'
+                            restart_timer = 120
+                            player_turn = False
                     break
                 msgs_to_send.append(f"ATK_RESP {1 if shots[-1][1] == True else 0}")
 
             elif m[0] == "ATK_RESP":
+                sounds[f'shoot_{random.randint(1, 4)}'].play()
                 if int(m[1]) == 1:
                     shots[-1][1] = True
 
             elif m[0] == "ENEMY_WIN":
                 result = 'WIN'
+                restart_timer = 120
+                player_turn = False
 
             elif m[0] == "READY":
                 is_ready['player'] = True
@@ -206,37 +283,45 @@ while run:
 
         recv_msg = None
 
+
     # DRAW ------------------------------------ #
 
     display.fill(BG_COLOR)
 
     # boards
-    for b in [[PLL_COLOR, PLB_COLOR, plb_topleft, plb_bg_r], [ENL_COLOR, ENB_COLOR, enb_topleft, enb_bg_r]]:
-        pygame.draw.rect(display, b[1], b[3])
+    for b in [[PLL_COLOR, plb_topleft], [ENL_COLOR, enb_topleft]]:
         for l in range(1, bd_size):
             pygame.draw.line( # vertical
                 display, b[0], 
-                translate(b[2], [l * bd_scale, 0]),
-                translate(b[2], [l * bd_scale, bd_sisc])
+                translate(b[1], [l * bd_scale, 0]),
+                translate(b[1], [l * bd_scale, bd_sisc])
             )
             pygame.draw.line( # horizontal
                 display, b[0], 
-                translate(b[2], [0, l * bd_scale]),
-                translate(b[2], [bd_sisc, l * bd_scale])
+                translate(b[1], [0, l * bd_scale]),
+                translate(b[1], [bd_sisc, l * bd_scale])
             )
-    
+
     # ships
     for s in ships:
         s.draw(display, plb_topleft, bd_scale)
     if stage == 1 and is_ship_on_board(preview_ship):
         preview_ship.draw(display, plb_topleft, bd_scale)
 
+    # lines
+    for i, m in enumerate(missiles):
+        x = 2 * (m[3] // 2)  # "lag" animation 
+        pygame.draw.rect(display, MISSILE_COLOR, [x, m[0] *x**2 + m[1] * x + m[2], 5, 5], 2)
+        missiles[i][3] += m[5]
+        if missiles[i][3] > m[4]:
+            del missiles[i]
+
     # shots
     for s in shots:
-        shot_color = [255, 255, 255]
+        shot_color = MISSILE_COLOR
         if s[1]:
-            shot_color = [250, 0, 0]
-        pygame.draw.circle(display, shot_color, s[0], bd_scale * 0.4)
+            shot_color = [255, 0, 0]
+        pygame.draw.circle(display, shot_color, s[0], bd_scale * 0.1)
 
     # result
     if result == 'WIN':
@@ -254,5 +339,6 @@ while run:
     pygame.display.update()
 
 client.disconnect()
-server.stop()
+if server:
+    server.stop()
 pygame.quit()

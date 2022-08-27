@@ -2,8 +2,10 @@ import pygame
 
 
 class Ship:
-    def __init__(self, pos: list, length: int, direction: int):
+    def __init__(self, sprite: object, pos: list, length: int, direction: int):
         self.pos = pos
+        self.sprite_original = sprite
+        self.sprite = sprite
         self.length = length
         self.direction = direction
         self.changeDirection(direction)
@@ -45,14 +47,21 @@ class Ship:
                 self.parts.append([self._translate(self.pos, [-i, 0]), 1])
             elif direction == 90:
                 self.parts.append([self._translate(self.pos, [i, 0]), 1])
+        self.sprite = pygame.transform.rotate(self.sprite_original, -self.direction)
 
 
     def draw(self, display: object, bd_pos, bd_scale):
-        r = [0, 0, bd_scale - 6, bd_scale - 6]
-        for p in self.parts:
-            r[0] = bd_pos[0] + p[0][0] * bd_scale + 3
-            r[1] = bd_pos[1] + p[0][1] * bd_scale + 3
-            pygame.draw.rect(display, [0, 0, 0], r)
+        pos = [p * bd_scale for p in self.pos]
+        if self.direction == 0:
+            pos[1] -= (self.length - 1) * bd_scale
+        elif self.direction == 270:
+            pos[0] -= (self.length - 1) * bd_scale
+        display.blit(self.sprite, self._translate(pos, bd_pos))
+        '''
+        for r in self.parts:
+            pos = self._translate([p * bd_scale for p in r[0]], bd_pos)
+            pygame.draw.rect(display, [255, 0, 0], [pos[0], pos[1], bd_scale, bd_scale], 1)
+        '''
 
     @staticmethod
     def _translate(v1: list, v2: list) -> list:
