@@ -42,9 +42,15 @@ class Server:
         self.server.listen()
         print(f"[SERVER] Server is listening on {self.SERVER}.")
         while True:
-            conn, addr = self.server.accept()
+            try:
+                conn, addr = self.server.accept()
+            except OSError:
+                break
             thread = threading.Thread(target=self.handle_client, args=(conn, addr))
             thread.start()
+
+    def stop(self):
+        self.server.close()
 
 if __name__ == "__main__":
     s = Server()

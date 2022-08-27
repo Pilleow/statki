@@ -8,6 +8,7 @@ class Client:
         self.DISCONNECT_CODE = '102582957192'
         self.connected_addr = None
         self.await_messages = True
+        self.client = None
 
     def connect(self, host: str, port: int) -> None:
         self.connected_addr = (host, port)
@@ -19,7 +20,8 @@ class Client:
         self.client.send(message)
 
     def disconnect(self):
-        self.client.send(self.DISCONNECT_CODE.encode(self.FORMAT))
+        if self.client:
+            self.client.send(self.DISCONNECT_CODE.encode(self.FORMAT))
         self.await_messages = False
 
     def get_new_msg(self):

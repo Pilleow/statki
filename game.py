@@ -1,8 +1,10 @@
 import pygame
 import threading
+import requests
 
 from src.ship import *
 from src.client import *
+from src.server import *
 
 ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 RES = [1280, 720]
@@ -36,13 +38,13 @@ notif_font = pygame.font.SysFont("Comic Sans MS", 32)
 notif_text = notif_font.render("", False, [255, 255, 255], [0, 0, 0])
 lose_text = win_font.render("You lost, better luck next time!", True, [255, 128, 128], [0, 0, 0])
 win_text = win_font.render("You won! Congratulations!", True, [128, 255, 128], [0, 0, 0])
+server_info_text = None
 
 ship_units = [4, 3, 2, 2, 1]
 bd_separator = 50
 bd_size = 8
 bd_scale = 64
 notif_timer = 0
-notif_msg = ''
 bd_sisc = bd_scale * bd_size
 player_turn = False
 recv_msg = None
@@ -77,17 +79,9 @@ ships = []
 banned_positions = set()
 preview_ship = Ship([-100, -100], ship_units[len(ships)], 0)
 
-# connect to server
-print("Connecting...")
-
 IP = '192.168.1.67'
+server = None
 client = Client()
-client.connect(IP, 5050)
-
-listener = threading.Thread(target=listen_to_server, args=(client, ))
-listener.start()
-
-print(f"Connected to {client.connected_addr}!")
 
 run = True
 while run:
@@ -143,6 +137,21 @@ while run:
                 preview_ship.changeDirection(preview_ship.direction - 90)
             elif e.key == pygame.K_RIGHT:
                 preview_ship.changeDirection(preview_ship.direction + 90)
+            elif e.key == pygame.K_h and not server: # pls fix later
+                print("STARTING SERVER...")
+                server = Server()
+                server_thread = threading.Thread(target=server.start)
+                server_thread.start()
+                client.connect(IP, 5050)
+                listener_thread = threading.Thread(target=listen_to_server, args=(client, ))
+                listener_thread.start()
+                server_info_text = notif_font.render(f'{server.ADDR[0]}:{server.PORT}', True, [255, 255, 255], [128, 128, 128])
+            elif e.key == pygame.K_k and not client.connected_addr: # pls fix later
+                print("CONNECTING...")
+                client.connect(IP, 5050)
+                listener_thread = threading.Thread(target=listen_to_server, args=(client, ))
+                listener_thread.start()
+                print("CONNECTED")
 
     # SERVER COMMS ---------------------------- #
 
@@ -239,8 +248,11 @@ while run:
     if notif_timer > 0:
         notif_timer -= 1
         display.blit(notif_text, [(RES[0] - notif_text.get_width()) // 2, 0])
+    if server_info_text:
+        display.blit(server_info_text, [0, 0])
 
     pygame.display.update()
 
 client.disconnect()
+server.stop()
 pygame.quit()
